@@ -1,3 +1,3 @@
 ## 0.0.1
 
-* TODO: Describe initial release.
+* Создана начальная структура проекта Flutter Widget Recorder.
