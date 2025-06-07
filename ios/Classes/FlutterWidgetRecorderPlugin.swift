@@ -80,8 +80,15 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let outURL = docs.appendingPathComponent("\(name).mp4")
         videoOutputURL = outURL
+        
+        // Remove existing file if any
         if FileManager.default.fileExists(atPath: outURL.path) {
-            try? FileManager.default.removeItem(at: outURL)
+            do {
+                try FileManager.default.removeItem(at: outURL)
+            } catch {
+                isRecording = false
+                return result(FlutterError(code: "FILE_ERROR", message: "Cannot remove existing file", details: error.localizedDescription))
+            }
         }
 
         // create writer
@@ -91,29 +98,43 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
             isRecording = false
             return result(FlutterError(code: "WRITER_ERROR", message: "Cannot create AVAssetWriter", details: error.localizedDescription))
         }
-        videoWriter?.shouldOptimizeForNetworkUse = true
 
-        // H264 settings
+        // H264 settings with more specific configuration
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: pixelWidth,
-            AVVideoHeightKey: pixelHeight
+            AVVideoHeightKey: pixelHeight,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: 2_000_000,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                AVVideoMaxKeyFrameIntervalKey: 30,
+                AVVideoAllowFrameReorderingKey: false
+            ]
         ]
+
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         input.expectsMediaDataInRealTime = true
+        input.transform = CGAffineTransform(rotationAngle: 0)
+        
         guard let writer = videoWriter, writer.canAdd(input) else {
             isRecording = false
             return result(FlutterError(code: "INPUT_ERROR", message: "Cannot add input", details: nil))
         }
-        writer.add(input); videoWriterInput = input
 
         // adaptor for YUV420 (NV12)
         let yuvAttrs: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
             kCVPixelBufferWidthKey as String: pixelWidth,
-            kCVPixelBufferHeightKey as String: pixelHeight
+            kCVPixelBufferHeightKey as String: pixelHeight,
+            kCVPixelBufferBytesPerRowAlignmentKey as String: 16
         ]
-        pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: yuvAttrs)
+        pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: yuvAttrs
+        )
+
+        writer.add(input)
+        videoWriterInput = input
 
         // start
         writer.startWriting()
@@ -124,16 +145,97 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
 
     // MARK: — pushFrame
     private func pushFrame(rawData: Data, timestamp: CMTime, result: @escaping FlutterResult) {
-        guard isRecording,
-              let writer  = videoWriter,
-              let input   = videoWriterInput,
+        guard isRecording else {
+            return result(FlutterError(code: "NOT_RECORDING", message: "Not recording", details: nil))
+        }
+
+        // Check writer status and recreate if needed
+        if videoWriter == nil || videoWriter?.status == .failed || videoWriter?.status == .unknown {
+            guard let url = videoOutputURL else {
+                return result(FlutterError(code: "NO_URL", message: "No output URL", details: nil))
+            }
+            
+            // Clean up old writer if exists
+            if let oldWriter = videoWriter {
+                oldWriter.cancelWriting()
+                videoWriter = nil
+                videoWriterInput = nil
+                pixelBufferAdaptor = nil
+            }
+            
+            // Remove existing file if any
+            if FileManager.default.fileExists(atPath: url.path) {
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch {
+                    isRecording = false
+                    return result(FlutterError(code: "FILE_ERROR", message: "Cannot remove existing file", details: error.localizedDescription))
+                }
+            }
+            
+            // Create new writer
+            do {
+                videoWriter = try AVAssetWriter(outputURL: url, fileType: .mp4)
+            } catch {
+                isRecording = false
+                return result(FlutterError(code: "WRITER_ERROR", message: "Cannot create AVAssetWriter", details: error.localizedDescription))
+            }
+
+            // H264 settings with more specific configuration
+            let videoSettings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: pixelWidth,
+                AVVideoHeightKey: pixelHeight,
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: 2_000_000,
+                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                    AVVideoMaxKeyFrameIntervalKey: 30,
+                    AVVideoAllowFrameReorderingKey: false
+                ]
+            ]
+
+            let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+            input.expectsMediaDataInRealTime = true
+            input.transform = CGAffineTransform(rotationAngle: 0)
+            
+            guard let writer = videoWriter, writer.canAdd(input) else {
+                isRecording = false
+                return result(FlutterError(code: "INPUT_ERROR", message: "Cannot add input", details: nil))
+            }
+
+            // adaptor for YUV420 (NV12)
+            let yuvAttrs: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+                kCVPixelBufferWidthKey as String: pixelWidth,
+                kCVPixelBufferHeightKey as String: pixelHeight,
+                kCVPixelBufferBytesPerRowAlignmentKey as String: 16
+            ]
+            pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(
+                assetWriterInput: input,
+                sourcePixelBufferAttributes: yuvAttrs
+            )
+
+            writer.add(input)
+            videoWriterInput = input
+
+            // start
+            writer.startWriting()
+            writer.startSession(atSourceTime: .zero)
+            firstTimestamp = timestamp
+        }
+
+        guard let writer = videoWriter,
+              let input = videoWriterInput,
               let adaptor = pixelBufferAdaptor
         else {
             return result(FlutterError(code: "NOT_READY", message: "Not initialized", details: nil))
         }
-        if writer.status == .failed {
-            let err = writer.error?.localizedDescription ?? "Unknown"
-            return result(FlutterError(code: "WRITER_FAILED", message: "Writer failed: \(err)", details: nil))
+
+        // Check writer status before proceeding
+        if writer.status != .writing {
+            let status = writer.status.rawValue
+            let error = writer.error?.localizedDescription ?? "Unknown"
+            return result(FlutterError(code: "WRITER_ERROR", message: "Writer not in writing state: status=\(status), error=\(error)", details: nil))
         }
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -146,6 +248,15 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
                     self.firstTimestamp = timestamp
                 }
 
+                // Calculate actual stride from input data
+                let actualStride = rawData.count / self.frameHeight
+                if actualStride % 4 != 0 {
+                    DispatchQueue.main.async {
+                        result(FlutterError(code: "INVALID_STRIDE", message: "Invalid stride: \(actualStride)", details: nil))
+                    }
+                    return
+                }
+
                 // BGRA pixel buffer
                 var bgraBuf: CVPixelBuffer?
                 let bgraAttrs: [String: Any] = [
@@ -153,40 +264,104 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
                     kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
                     kCVPixelBufferWidthKey as String: self.pixelWidth,
                     kCVPixelBufferHeightKey as String: self.pixelHeight,
+                    kCVPixelBufferBytesPerRowAlignmentKey as String: 16,
                     kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
                 ]
-                CVPixelBufferCreate(kCFAllocatorDefault, self.pixelWidth, self.pixelHeight,
+                let status = CVPixelBufferCreate(kCFAllocatorDefault, self.pixelWidth, self.pixelHeight,
                                      kCVPixelFormatType_32BGRA, bgraAttrs as CFDictionary, &bgraBuf)
-                guard let bgra = bgraBuf else { return }
+                guard status == kCVReturnSuccess, let bgra = bgraBuf else {
+                    DispatchQueue.main.async {
+                        result(FlutterError(code: "BUFFER_CREATE_FAILED", message: "Failed to create pixel buffer", details: nil))
+                    }
+                    return
+                }
+
                 CVPixelBufferLockBaseAddress(bgra, [])
                 let dst = CVPixelBufferGetBaseAddress(bgra)!
                 let dstStride = CVPixelBufferGetBytesPerRow(bgra)
                 rawData.withUnsafeBytes { srcPtr in
                     let base = srcPtr.bindMemory(to: UInt8.self).baseAddress!
                     for row in 0..<self.frameHeight {
-                        let d = dst.advanced(by: row*dstStride)
-                        let s = base.advanced(by: row*self.frameWidth*4)
-                        memcpy(d, s, self.frameWidth*4)
+                        let d = dst.advanced(by: row*dstStride).assumingMemoryBound(to: UInt8.self)
+                        let s = base.advanced(by: row*actualStride)
+                        // Convert RGBA to BGRA by swapping R and B channels
+                        for i in stride(from: 0, to: self.frameWidth*4, by: 4) {
+                            d[i] = s[i+2]     // B = R
+                            d[i+1] = s[i+1]   // G = G
+                            d[i+2] = s[i]     // R = B
+                            d[i+3] = s[i+3]   // A = A
+                        }
+                        // Fill the rest of the row with zeros if needed
+                        if self.pixelWidth > self.frameWidth {
+                            for i in stride(from: self.frameWidth*4, to: self.pixelWidth*4, by: 4) {
+                                d[i] = 0       // B
+                                d[i+1] = 0     // G
+                                d[i+2] = 0     // R
+                                d[i+3] = 0     // A
+                            }
+                        }
+                    }
+                    // Fill the rest of the buffer with zeros if needed
+                    if self.pixelHeight > self.frameHeight {
+                        for row in self.frameHeight..<self.pixelHeight {
+                            let d = dst.advanced(by: row*dstStride).assumingMemoryBound(to: UInt8.self)
+                            for i in stride(from: 0, to: self.pixelWidth*4, by: 4) {
+                                d[i] = 0       // B
+                                d[i+1] = 0     // G
+                                d[i+2] = 0     // R
+                                d[i+3] = 0     // A
+                            }
+                        }
                     }
                 }
                 CVPixelBufferUnlockBaseAddress(bgra, [])
 
-                // create YUV buffer from pool
-                guard let pool = adaptor.pixelBufferPool else { return }
+                // Create YUV buffer directly
                 var yuvBuf: CVPixelBuffer?
-                CVPixelBufferPoolCreatePixelBuffer(nil, pool, &yuvBuf)
-                guard let yuv = yuvBuf else { return }
+                let yuvAttrs: [String: Any] = [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+                    kCVPixelBufferWidthKey as String: self.pixelWidth,
+                    kCVPixelBufferHeightKey as String: self.pixelHeight,
+                    kCVPixelBufferBytesPerRowAlignmentKey as String: 16
+                ]
+                let yuvStatus = CVPixelBufferCreate(kCFAllocatorDefault, self.pixelWidth, self.pixelHeight,
+                                     kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, yuvAttrs as CFDictionary, &yuvBuf)
+                guard yuvStatus == kCVReturnSuccess, let yuv = yuvBuf else {
+                    DispatchQueue.main.async {
+                        result(FlutterError(code: "YUV_CREATE_FAILED", message: "Failed to create YUV buffer", details: nil))
+                    }
+                    return
+                }
 
                 // convert via CoreImage
                 let ciImage = CIImage(cvPixelBuffer: bgra)
                 self.ciContext.render(ciImage, to: yuv)
 
+                // Check writer status again before appending
+                if writer.status != .writing {
+                    let status = writer.status.rawValue
+                    let error = writer.error?.localizedDescription ?? "Unknown"
+                    DispatchQueue.main.async {
+                        result(FlutterError(code: "WRITER_ERROR", message: "Writer failed before append: status=\(status), error=\(error)", details: nil))
+                    }
+                    return
+                }
+
                 // append
-                if writer.status == .writing && input.isReadyForMoreMediaData {
+                if input.isReadyForMoreMediaData {
                     let ok = adaptor.append(yuv, withPresentationTime: pts)
-                    DispatchQueue.main.async { result(ok) }
+                    if !ok {
+                        let err = writer.error?.localizedDescription ?? "Unknown"
+                        DispatchQueue.main.async {
+                            result(FlutterError(code: "APPEND_FAILED", message: "Failed to append pixel buffer: \(err)", details: nil))
+                        }
+                        return
+                    }
+                    DispatchQueue.main.async { result(true) }
                 } else {
-                    DispatchQueue.main.async { result(false) }
+                    DispatchQueue.main.async {
+                        result(FlutterError(code: "NOT_READY", message: "Input not ready for more media data", details: nil))
+                    }
                 }
             }
         }

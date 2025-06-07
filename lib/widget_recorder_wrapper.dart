@@ -14,6 +14,10 @@ class WidgetRecorderWrapper extends StatelessWidget {
   ///
   /// [child] - widget to record
   /// [controller] - controller for recording
+  ///
+  /// Adds padding to the widget to make it a multiple of 16.
+  ///
+  /// It is necessary for the video to be recorded correctly on iOS.
   const WidgetRecorderWrapper({
     super.key,
     required this.child,
@@ -22,9 +26,20 @@ class WidgetRecorderWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return RepaintBoundary(
-      key: controller.repaintKey,
-      child: child,
-    );
+    return LayoutBuilder(builder: (context, constraints) {
+      return Stack(
+        alignment: Alignment.center,
+        children: [
+          SizedBox(
+            width: constraints.maxWidth ~/ 16 * 16,
+            height: constraints.maxHeight ~/ 16 * 16,
+            child: RepaintBoundary(
+              key: controller.repaintKey,
+              child: child,
+            ),
+          ),
+        ],
+      );
+    });
   }
 }

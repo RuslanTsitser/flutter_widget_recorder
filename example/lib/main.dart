@@ -88,11 +88,18 @@ class _ExampleScreenState extends State<ExampleScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Flexible(
-            child: WidgetRecorderWrapper(
-              controller: _controller,
-              child: ColoredBox(
-                color: Colors.blue,
-                child: const AnimationExample(),
+            child: ColoredBox(
+              color: Colors.red,
+              child: SizedBox(
+                width: 200,
+                height: 200,
+                child: WidgetRecorderWrapper(
+                  controller: _controller,
+                  child: ColoredBox(
+                    color: Colors.blue,
+                    child: const AnimationExample(),
+                  ),
+                ),
               ),
             ),
           ),
@@ -160,9 +167,11 @@ class _AnimationExampleState extends State<AnimationExample>
                 Positioned(
                   left: _controller.value * (constraints.maxWidth - 100),
                   top: _controller.value * (constraints.maxHeight - 100),
-                  child: ColoredBox(
-                    color: Colors.red,
-                    child: SizedBox.square(dimension: 100),
+                  child: ClipOval(
+                    child: ColoredBox(
+                      color: Colors.red,
+                      child: SizedBox.square(dimension: 100),
+                    ),
                   ),
                 ),
               ],
