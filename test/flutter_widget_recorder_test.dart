@@ -1,29 +1,56 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_widget_recorder/flutter_widget_recorder.dart';
-import 'package:flutter_widget_recorder/flutter_widget_recorder_platform_interface.dart';
 import 'package:flutter_widget_recorder/flutter_widget_recorder_method_channel.dart';
+import 'package:flutter_widget_recorder/flutter_widget_recorder_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 class MockFlutterWidgetRecorderPlatform
     with MockPlatformInterfaceMixin
     implements FlutterWidgetRecorderPlatform {
+  @override
+  Future<void> pushFrame(
+      {required Uint8List frame,
+      required int width,
+      required int height,
+      required int timestamp}) async {
+    return;
+  }
 
   @override
-  Future<String?> getPlatformVersion() => Future.value('42');
+  Future<bool> startRecording(
+      {required String name, required int width, required int height}) async {
+    return true;
+  }
+
+  @override
+  Future<String?> stopRecording() async {
+    return null;
+  }
 }
 
 void main() {
-  final FlutterWidgetRecorderPlatform initialPlatform = FlutterWidgetRecorderPlatform.instance;
+  final FlutterWidgetRecorderPlatform initialPlatform =
+      FlutterWidgetRecorderPlatform.instance;
 
   test('$MethodChannelFlutterWidgetRecorder is the default instance', () {
     expect(initialPlatform, isInstanceOf<MethodChannelFlutterWidgetRecorder>());
   });
 
-  test('getPlatformVersion', () async {
+  test('startRecording', () async {
     FlutterWidgetRecorder flutterWidgetRecorderPlugin = FlutterWidgetRecorder();
-    MockFlutterWidgetRecorderPlatform fakePlatform = MockFlutterWidgetRecorderPlatform();
+    MockFlutterWidgetRecorderPlatform fakePlatform =
+        MockFlutterWidgetRecorderPlatform();
     FlutterWidgetRecorderPlatform.instance = fakePlatform;
 
-    expect(await flutterWidgetRecorderPlugin.getPlatformVersion(), '42');
+    expect(
+      await flutterWidgetRecorderPlugin.startRecording(
+        name: 'test',
+        width: 100,
+        height: 100,
+      ),
+      true,
+    );
   });
 }

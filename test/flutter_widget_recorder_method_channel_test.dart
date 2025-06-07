@@ -5,23 +5,52 @@ import 'package:flutter_widget_recorder/flutter_widget_recorder_method_channel.d
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  MethodChannelFlutterWidgetRecorder platform = MethodChannelFlutterWidgetRecorder();
+  MethodChannelFlutterWidgetRecorder platform =
+      MethodChannelFlutterWidgetRecorder();
   const MethodChannel channel = MethodChannel('flutter_widget_recorder');
 
   setUp(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
       channel,
       (MethodCall methodCall) async {
-        return '42';
+        switch (methodCall.method) {
+          case 'startRecording':
+            return true;
+          case 'stopRecording':
+            return 'hello';
+          case 'pushFrame':
+            return null;
+          default:
+            throw PlatformException(
+              code: 'unimplemented',
+              message: '${methodCall.method} not implemented',
+            );
+        }
       },
     );
   });
 
   tearDown(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
   });
 
-  test('getPlatformVersion', () async {
-    expect(await platform.getPlatformVersion(), '42');
+  test('startRecording', () async {
+    expect(await platform.startRecording(name: 'test', width: 100, height: 100),
+        true);
+  });
+
+  test('stopRecording', () async {
+    expect(await platform.stopRecording(), 'hello');
+  });
+
+  test('pushFrame', () async {
+    await platform.pushFrame(
+      frame: Uint8List(0),
+      width: 100,
+      height: 100,
+      timestamp: 0,
+    );
   });
 }
