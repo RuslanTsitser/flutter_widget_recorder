@@ -4,12 +4,16 @@ import AVFoundation
 import CoreMedia
 
 public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
+    // MARK: — свойства
     var videoWriter: AVAssetWriter?
     var videoWriterInput: AVAssetWriterInput?
     var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
     var videoOutputURL: URL?
     var isRecording = false
+    /// метка времени первого кадра в миллисекундах
+    var firstTimestampMs: Int64?
 
+    // MARK: — регистрация плагина
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(
             name: "flutter_widget_recorder",
@@ -19,6 +23,7 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
 
+    // MARK: — handle
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
         case "startRecording":
@@ -57,13 +62,20 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
         }
     }
 
-    func startRecording(name: String, width: Int, height: Int, result: @escaping FlutterResult) {
+    // MARK: — startRecording
+    func startRecording(
+        name: String,
+        width: Int,
+        height: Int,
+        result: @escaping FlutterResult
+    ) {
         guard !isRecording else {
             return result(FlutterError(code: "ALREADY_RECORDING", message: "Already recording", details: nil))
         }
         isRecording = true
+        firstTimestampMs = nil
 
-        // Файл .mov в Documents
+        // Подготовка файла .mov
         let docs = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
         let url = URL(fileURLWithPath: docs).appendingPathComponent("\(name).mov")
         videoOutputURL = url
@@ -71,7 +83,7 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
             try? FileManager.default.removeItem(at: url)
         }
 
-        // Создаём writer
+        // Создаём AVAssetWriter
         do {
             videoWriter = try AVAssetWriter(outputURL: url, fileType: .mov)
         } catch {
@@ -80,7 +92,7 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
         }
         videoWriter!.shouldOptimizeForNetworkUse = true
 
-        // Минимальные настройки видео
+        // Минимальные настройки: H.264 + размер
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: width,
@@ -102,21 +114,26 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
             kCVPixelBufferWidthKey as String: width,
             kCVPixelBufferHeightKey as String: height
         ]
-        pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input,
-                                                                 sourcePixelBufferAttributes: attrs)
+        pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: attrs
+        )
 
-        // Сразу стартуем запись
+        // Сразу стартуем запись сессии с времени 0
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
 
         result(true)
     }
 
-    func pushFrame(_ rawData: Data,
-                   width: Int,
-                   height: Int,
-                   timestamp: CMTime,
-                   result: @escaping FlutterResult) {
+    // MARK: — pushFrame
+    func pushFrame(
+        _ rawData: Data,
+        width: Int,
+        height: Int,
+        timestamp: CMTime,
+        result: @escaping FlutterResult
+    ) {
         guard isRecording,
               let writer = videoWriter,
               let input = videoWriterInput,
@@ -129,7 +146,15 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
         }
 
         DispatchQueue.global(qos: .userInitiated).async {
-            // RGBA → BGRA
+            // Определяем относительный timestamp
+            let tsMs = timestamp.value
+            if self.firstTimestampMs == nil {
+                self.firstTimestampMs = tsMs
+            }
+            let relMs = tsMs - (self.firstTimestampMs ?? tsMs)
+            let relTime = CMTimeMake(value: relMs, timescale: 1000)
+
+            // Конвертируем RGBA → BGRA
             var bgra = rawData
             bgra.withUnsafeMutableBytes { buf in
                 let p = buf.bindMemory(to: UInt8.self)
@@ -140,7 +165,7 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
                 }
             }
 
-            // Создаём CVPixelBuffer и копируем
+            // Создаём CVPixelBuffer
             var pxOpt: CVPixelBuffer?
             let attrs: [String: Any] = [
                 kCVPixelBufferCGImageCompatibilityKey as String: true,
@@ -149,11 +174,13 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
                 kCVPixelBufferHeightKey as String: height,
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
             ]
-            let status = CVPixelBufferCreate(kCFAllocatorDefault,
-                                             width, height,
-                                             kCVPixelFormatType_32BGRA,
-                                             attrs as CFDictionary,
-                                             &pxOpt)
+            let status = CVPixelBufferCreate(
+                kCFAllocatorDefault,
+                width, height,
+                kCVPixelFormatType_32BGRA,
+                attrs as CFDictionary,
+                &pxOpt
+            )
             guard status == kCVReturnSuccess, let px = pxOpt else {
                 DispatchQueue.main.async {
                     result(FlutterError(code: "PIXEL_ERR", message: "Cannot alloc pixelBuffer", details: "\(status)"))
@@ -168,9 +195,9 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
             }
             CVPixelBufferUnlockBaseAddress(px, [])
 
-            // Append через адаптор
+            // Append через адаптор с относительным временем
             if writer.status == .writing && input.isReadyForMoreMediaData {
-                let ok = adaptor.append(px, withPresentationTime: timestamp)
+                let ok = adaptor.append(px, withPresentationTime: relTime)
                 DispatchQueue.main.async {
                     if ok { result(true) }
                     else {
@@ -184,6 +211,7 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
         }
     }
 
+    // MARK: — stopRecording
     func stopRecording(result: @escaping FlutterResult) {
         guard isRecording,
               let writer = videoWriter,
@@ -203,6 +231,7 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
             self?.videoWriter = nil
             self?.videoWriterInput = nil
             self?.pixelBufferAdaptor = nil
+            self?.firstTimestampMs = nil
         }
     }
 }
