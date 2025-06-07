@@ -10,8 +10,45 @@ class MethodChannelFlutterWidgetRecorder extends FlutterWidgetRecorderPlatform {
   final methodChannel = const MethodChannel('flutter_widget_recorder');
 
   @override
-  Future<String?> getPlatformVersion() async {
-    final version = await methodChannel.invokeMethod<String>('getPlatformVersion');
-    return version;
+  Future<bool> startRecording({
+    required String name,
+    required int width,
+    required int height,
+  }) async {
+    const String methodName = 'startRecording';
+    final Map<String, dynamic> args = {
+      'name': name,
+      'width': width,
+      'height': height,
+    };
+
+    final bool? result =
+        await methodChannel.invokeMethod<bool>(methodName, args);
+    return result ?? false;
+  }
+
+  @override
+  Future<void> pushFrame({
+    required Uint8List frame,
+    required int width,
+    required int height,
+    required int timestamp,
+  }) async {
+    final pixels = frame.buffer.asUint8List();
+    const String methodName = 'pushFrame';
+    final Map<String, dynamic> args = {
+      'pixels': pixels,
+      'width': width,
+      'height': height,
+      'timestampMs': timestamp,
+    };
+    await methodChannel.invokeMethod<void>(methodName, args);
+  }
+
+  @override
+  Future<String?> stopRecording() async {
+    const String methodName = 'stopRecording';
+    final String? result = await methodChannel.invokeMethod<String>(methodName);
+    return result;
   }
 }
