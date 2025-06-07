@@ -94,12 +94,13 @@ class WidgetRecorderController with ChangeNotifier {
       // 3. Convert to ByteData in rawRgba format
       ByteData? byteData =
           await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      final width = image.width;
+      final height = image.height;
+      image.dispose();
       if (byteData == null) return;
 
       // 4. Form arguments for MethodChannel
       final pixels = byteData.buffer.asUint8List();
-      final width = image.width;
-      final height = image.height;
       final timestampMs = DateTime.now().millisecondsSinceEpoch;
 
       // 5. Send to native
