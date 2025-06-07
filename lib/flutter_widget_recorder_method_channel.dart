@@ -14,12 +14,14 @@ class MethodChannelFlutterWidgetRecorder extends FlutterWidgetRecorderPlatform {
     required String name,
     required int width,
     required int height,
+    required double pixelRatio,
   }) async {
     const String methodName = 'startRecording';
     final Map<String, dynamic> args = {
       'name': name,
       'width': width,
       'height': height,
+      'pixelRatio': pixelRatio,
     };
 
     final bool? result =
@@ -34,10 +36,9 @@ class MethodChannelFlutterWidgetRecorder extends FlutterWidgetRecorderPlatform {
     required int height,
     required int timestamp,
   }) async {
-    final pixels = frame.buffer.asUint8List();
     const String methodName = 'pushFrame';
     final Map<String, dynamic> args = {
-      'pixels': pixels,
+      'pixels': frame,
       'width': width,
       'height': height,
       'timestampMs': timestamp,

@@ -37,8 +37,15 @@ void main() {
   });
 
   test('startRecording', () async {
-    expect(await platform.startRecording(name: 'test', width: 100, height: 100),
-        true);
+    expect(
+      await platform.startRecording(
+        name: 'test',
+        width: 100,
+        height: 100,
+        pixelRatio: 1.0,
+      ),
+      true,
+    );
   });
 
   test('stopRecording', () async {

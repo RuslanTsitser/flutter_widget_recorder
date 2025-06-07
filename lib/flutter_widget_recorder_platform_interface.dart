@@ -43,6 +43,7 @@ abstract class FlutterWidgetRecorderPlatform extends PlatformInterface {
     required String name,
     required int width,
     required int height,
+    required double pixelRatio,
   });
 
   /// Pushes a frame to the recording.

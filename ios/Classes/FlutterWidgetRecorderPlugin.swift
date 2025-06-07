@@ -1,19 +1,26 @@
+// FlutterWidgetRecorderPlugin.swift
 import Flutter
 import UIKit
 import AVFoundation
 import CoreMedia
+import CoreImage
 
 public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
-    // MARK: — свойства
-    var videoWriter: AVAssetWriter?
-    var videoWriterInput: AVAssetWriterInput?
-    var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
-    var videoOutputURL: URL?
-    var isRecording = false
-    /// метка времени первого кадра в миллисекундах
-    var firstTimestampMs: Int64?
+    // MARK: — properties
+    private var videoWriter: AVAssetWriter?
+    private var videoWriterInput: AVAssetWriterInput?
+    private var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
+    private var videoOutputURL: URL?
+    private var isRecording = false
+    private var pixelWidth = 0
+    private var pixelHeight = 0
+    // original frame dims before alignment
+    private var frameWidth = 0
+    private var frameHeight = 0
+    private var firstTimestamp: CMTime?
+    private let ciContext = CIContext()
 
-    // MARK: — регистрация плагина
+    // MARK: — registration
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(
             name: "flutter_widget_recorder",
@@ -23,36 +30,36 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
 
-    // MARK: — handle
+    // MARK: — handler
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
         case "startRecording":
             guard let args = call.arguments as? [String: Any],
-                  let name = args["name"] as? String,
-                  let width = args["width"] as? Int,
-                  let height = args["height"] as? Int else {
-                return result(FlutterError(
-                    code: "INVALID_ARGS",
-                    message: "Expected name/width/height",
-                    details: nil
-                ))
+                  let name       = args["name"] as? String,
+                  let width      = args["width"] as? Int,
+                  let height     = args["height"] as? Int,
+                  let pixelRatio = args["pixelRatio"] as? Double
+            else {
+                return result(FlutterError(code: "INVALID_ARGS", message: "Expected name, width, height, pixelRatio", details: nil))
             }
-            startRecording(name: name, width: width, height: height, result: result)
+            // compute physical dims
+            let unW = Int(Double(width) * pixelRatio)
+            let unH = Int(Double(height) * pixelRatio)
+            frameWidth = unW; frameHeight = unH
+            // align to 16
+            pixelWidth  = ((unW + 15)/16)*16
+            pixelHeight = ((unH + 15)/16)*16
+            startRecording(name: name, result: result)
 
         case "pushFrame":
-            guard let args = call.arguments as? [String: Any],
-                  let pixels = args["pixels"] as? FlutterStandardTypedData,
-                  let width = args["width"] as? Int,
-                  let height = args["height"] as? Int,
-                  let tsMs = args["timestampMs"] as? Int64 else {
-                return result(FlutterError(
-                    code: "INVALID_ARGS",
-                    message: "Expected pixels/width/height/timestampMs",
-                    details: nil
-                ))
+            guard let args     = call.arguments as? [String: Any],
+                  let data     = args["pixels"] as? FlutterStandardTypedData,
+                  let tsMillis = args["timestampMs"] as? Int64
+            else {
+                return result(FlutterError(code: "INVALID_ARGS", message: "Expected pixels, timestampMs", details: nil))
             }
-            let ts = CMTimeMake(value: tsMs, timescale: 1000)
-            pushFrame(pixels.data, width: width, height: height, timestamp: ts, result: result)
+            let timestamp = CMTimeMake(value: tsMillis, timescale: 1000)
+            pushFrame(rawData: data.data, timestamp: timestamp, result: result)
 
         case "stopRecording":
             stopRecording(result: result)
@@ -63,63 +70,52 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
     }
 
     // MARK: — startRecording
-    func startRecording(
-        name: String,
-        width: Int,
-        height: Int,
-        result: @escaping FlutterResult
-    ) {
+    private func startRecording(name: String, result: @escaping FlutterResult) {
         guard !isRecording else {
-            return result(FlutterError(code: "ALREADY_RECORDING", message: "Already recording", details: nil))
+            return result(FlutterError(code: "ALREADY_RECORDING", message: "Recording already in progress", details: nil))
         }
-        isRecording = true
-        firstTimestampMs = nil
+        isRecording = true; firstTimestamp = nil
 
-        // Подготовка файла .mov
-        let docs = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
-        let url = URL(fileURLWithPath: docs).appendingPathComponent("\(name).mov")
-        videoOutputURL = url
-        if FileManager.default.fileExists(atPath: url.path) {
-            try? FileManager.default.removeItem(at: url)
+        // prepare file
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let outURL = docs.appendingPathComponent("\(name).mp4")
+        videoOutputURL = outURL
+        if FileManager.default.fileExists(atPath: outURL.path) {
+            try? FileManager.default.removeItem(at: outURL)
         }
 
-        // Создаём AVAssetWriter
+        // create writer
         do {
-            videoWriter = try AVAssetWriter(outputURL: url, fileType: .mov)
+            videoWriter = try AVAssetWriter(outputURL: outURL, fileType: .mp4)
         } catch {
             isRecording = false
-            return result(FlutterError(code: "WRITER_ERROR", message: "Cannot create writer", details: error.localizedDescription))
+            return result(FlutterError(code: "WRITER_ERROR", message: "Cannot create AVAssetWriter", details: error.localizedDescription))
         }
-        videoWriter!.shouldOptimizeForNetworkUse = true
+        videoWriter?.shouldOptimizeForNetworkUse = true
 
-        // Минимальные настройки: H.264 + размер
+        // H264 settings
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: width,
-            AVVideoHeightKey: height
+            AVVideoWidthKey: pixelWidth,
+            AVVideoHeightKey: pixelHeight
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         input.expectsMediaDataInRealTime = true
-
         guard let writer = videoWriter, writer.canAdd(input) else {
             isRecording = false
             return result(FlutterError(code: "INPUT_ERROR", message: "Cannot add input", details: nil))
         }
-        writer.add(input)
-        videoWriterInput = input
+        writer.add(input); videoWriterInput = input
 
-        // PixelBufferAdaptor: указываем BGRA
-        let attrs: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
-            kCVPixelBufferWidthKey as String: width,
-            kCVPixelBufferHeightKey as String: height
+        // adaptor for YUV420 (NV12)
+        let yuvAttrs: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelBufferWidthKey as String: pixelWidth,
+            kCVPixelBufferHeightKey as String: pixelHeight
         ]
-        pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: attrs
-        )
+        pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: yuvAttrs)
 
-        // Сразу стартуем запись сессии с времени 0
+        // start
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
 
@@ -127,17 +123,12 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
     }
 
     // MARK: — pushFrame
-    func pushFrame(
-        _ rawData: Data,
-        width: Int,
-        height: Int,
-        timestamp: CMTime,
-        result: @escaping FlutterResult
-    ) {
+    private func pushFrame(rawData: Data, timestamp: CMTime, result: @escaping FlutterResult) {
         guard isRecording,
-              let writer = videoWriter,
-              let input = videoWriterInput,
-              let adaptor = pixelBufferAdaptor else {
+              let writer  = videoWriter,
+              let input   = videoWriterInput,
+              let adaptor = pixelBufferAdaptor
+        else {
             return result(FlutterError(code: "NOT_READY", message: "Not initialized", details: nil))
         }
         if writer.status == .failed {
@@ -146,77 +137,65 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
         }
 
         DispatchQueue.global(qos: .userInitiated).async {
-            // Определяем относительный timestamp
-            let tsMs = timestamp.value
-            if self.firstTimestampMs == nil {
-                self.firstTimestampMs = tsMs
-            }
-            let relMs = tsMs - (self.firstTimestampMs ?? tsMs)
-            let relTime = CMTimeMake(value: relMs, timescale: 1000)
-
-            // Конвертируем RGBA → BGRA
-            var bgra = rawData
-            bgra.withUnsafeMutableBytes { buf in
-                let p = buf.bindMemory(to: UInt8.self)
-                for i in stride(from: 0, to: p.count, by: 4) {
-                    let r = p[i]
-                    p[i]     = p[i+2]
-                    p[i+2]   = r
+            autoreleasepool {
+                // timestamp
+                var pts = CMTime.zero
+                if let first = self.firstTimestamp {
+                    pts = CMTimeSubtract(timestamp, first)
+                } else {
+                    self.firstTimestamp = timestamp
                 }
-            }
 
-            // Создаём CVPixelBuffer
-            var pxOpt: CVPixelBuffer?
-            let attrs: [String: Any] = [
-                kCVPixelBufferCGImageCompatibilityKey as String: true,
-                kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
-                kCVPixelBufferWidthKey as String: width,
-                kCVPixelBufferHeightKey as String: height,
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
-            ]
-            let status = CVPixelBufferCreate(
-                kCFAllocatorDefault,
-                width, height,
-                kCVPixelFormatType_32BGRA,
-                attrs as CFDictionary,
-                &pxOpt
-            )
-            guard status == kCVReturnSuccess, let px = pxOpt else {
-                DispatchQueue.main.async {
-                    result(FlutterError(code: "PIXEL_ERR", message: "Cannot alloc pixelBuffer", details: "\(status)"))
-                }
-                return
-            }
-            CVPixelBufferLockBaseAddress(px, [])
-            if let dst = CVPixelBufferGetBaseAddress(px) {
-                bgra.withUnsafeBytes { src in
-                    memcpy(dst, src.baseAddress!, width * height * 4)
-                }
-            }
-            CVPixelBufferUnlockBaseAddress(px, [])
-
-            // Append через адаптор с относительным временем
-            if writer.status == .writing && input.isReadyForMoreMediaData {
-                let ok = adaptor.append(px, withPresentationTime: relTime)
-                DispatchQueue.main.async {
-                    if ok { result(true) }
-                    else {
-                        let e = writer.error?.localizedDescription
-                        result(FlutterError(code: "APPEND_ERR", message: "Append failed", details: e))
+                // BGRA pixel buffer
+                var bgraBuf: CVPixelBuffer?
+                let bgraAttrs: [String: Any] = [
+                    kCVPixelBufferCGImageCompatibilityKey as String: true,
+                    kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
+                    kCVPixelBufferWidthKey as String: self.pixelWidth,
+                    kCVPixelBufferHeightKey as String: self.pixelHeight,
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+                ]
+                CVPixelBufferCreate(kCFAllocatorDefault, self.pixelWidth, self.pixelHeight,
+                                     kCVPixelFormatType_32BGRA, bgraAttrs as CFDictionary, &bgraBuf)
+                guard let bgra = bgraBuf else { return }
+                CVPixelBufferLockBaseAddress(bgra, [])
+                let dst = CVPixelBufferGetBaseAddress(bgra)!
+                let dstStride = CVPixelBufferGetBytesPerRow(bgra)
+                rawData.withUnsafeBytes { srcPtr in
+                    let base = srcPtr.bindMemory(to: UInt8.self).baseAddress!
+                    for row in 0..<self.frameHeight {
+                        let d = dst.advanced(by: row*dstStride)
+                        let s = base.advanced(by: row*self.frameWidth*4)
+                        memcpy(d, s, self.frameWidth*4)
                     }
                 }
-            } else {
-                DispatchQueue.main.async { result(false) }
+                CVPixelBufferUnlockBaseAddress(bgra, [])
+
+                // create YUV buffer from pool
+                guard let pool = adaptor.pixelBufferPool else { return }
+                var yuvBuf: CVPixelBuffer?
+                CVPixelBufferPoolCreatePixelBuffer(nil, pool, &yuvBuf)
+                guard let yuv = yuvBuf else { return }
+
+                // convert via CoreImage
+                let ciImage = CIImage(cvPixelBuffer: bgra)
+                self.ciContext.render(ciImage, to: yuv)
+
+                // append
+                if writer.status == .writing && input.isReadyForMoreMediaData {
+                    let ok = adaptor.append(yuv, withPresentationTime: pts)
+                    DispatchQueue.main.async { result(ok) }
+                } else {
+                    DispatchQueue.main.async { result(false) }
+                }
             }
         }
     }
 
     // MARK: — stopRecording
-    func stopRecording(result: @escaping FlutterResult) {
-        guard isRecording,
-              let writer = videoWriter,
-              let input = videoWriterInput else {
-            return result(FlutterError(code: "NOT_RECORDING", message: "No recording", details: nil))
+    private func stopRecording(result: @escaping FlutterResult) {
+        guard isRecording, let writer = videoWriter, let input = videoWriterInput else {
+            return result(FlutterError(code: "NOT_RECORDING", message: "No recording in progress", details: nil))
         }
         isRecording = false
         input.markAsFinished()
@@ -231,7 +210,8 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
             self?.videoWriter = nil
             self?.videoWriterInput = nil
             self?.pixelBufferAdaptor = nil
-            self?.firstTimestampMs = nil
+            self?.firstTimestamp = nil
         }
     }
 }
+

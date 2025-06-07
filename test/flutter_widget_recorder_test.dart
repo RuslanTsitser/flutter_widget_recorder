@@ -19,8 +19,12 @@ class MockFlutterWidgetRecorderPlatform
   }
 
   @override
-  Future<bool> startRecording(
-      {required String name, required int width, required int height}) async {
+  Future<bool> startRecording({
+    required String name,
+    required int width,
+    required int height,
+    required double pixelRatio,
+  }) async {
     return true;
   }
 
@@ -49,6 +53,7 @@ void main() {
         name: 'test',
         width: 100,
         height: 100,
+        pixelRatio: 1.0,
       ),
       true,
     );

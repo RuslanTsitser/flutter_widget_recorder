@@ -7,11 +7,13 @@ class FlutterWidgetRecorder {
     required String name,
     required int width,
     required int height,
+    required double pixelRatio,
   }) {
     return FlutterWidgetRecorderPlatform.instance.startRecording(
       name: name,
       width: width,
       height: height,
+      pixelRatio: pixelRatio,
     );
   }
 

@@ -36,6 +36,7 @@ class _ExampleScreenState extends State<ExampleScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Example')),
       floatingActionButton: Column(
@@ -46,7 +47,7 @@ class _ExampleScreenState extends State<ExampleScreen> {
             heroTag: 'start',
             key: const Key('start_button'),
             onPressed: () {
-              _controller.startRecording('example');
+              _controller.startRecording('example', pixelRatio: pixelRatio);
             },
             child: const Icon(Icons.play_arrow),
           ),
@@ -87,10 +88,10 @@ class _ExampleScreenState extends State<ExampleScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Flexible(
-            child: ColoredBox(
-              color: Colors.blue,
-              child: WidgetRecorderWrapper(
-                controller: _controller,
+            child: WidgetRecorderWrapper(
+              controller: _controller,
+              child: ColoredBox(
+                color: Colors.blue,
                 child: const AnimationExample(),
               ),
             ),
