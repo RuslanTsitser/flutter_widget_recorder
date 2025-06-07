@@ -4,23 +4,21 @@ import AVFoundation
 import CoreMedia
 
 public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
-    // MARK: — свойства
     var videoWriter: AVAssetWriter?
     var videoWriterInput: AVAssetWriterInput?
+    var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
     var videoOutputURL: URL?
     var isRecording = false
-    var firstTimestamp: CMTime?
-    var expectedWidth: Int = 0
-    var expectedHeight: Int = 0
 
-    // MARK: — регистрация плагина
     public static func register(with registrar: FlutterPluginRegistrar) {
-        let channel = FlutterMethodChannel(name: "flutter_widget_recorder", binaryMessenger: registrar.messenger())
+        let channel = FlutterMethodChannel(
+            name: "flutter_widget_recorder",
+            binaryMessenger: registrar.messenger()
+        )
         let instance = FlutterWidgetRecorderPlugin()
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
 
-    // MARK: — обработка вызовов из Flutter
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
         case "startRecording":
@@ -28,21 +26,27 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
                   let name = args["name"] as? String,
                   let width = args["width"] as? Int,
                   let height = args["height"] as? Int else {
-                result(FlutterError(code: "INVALID_ARGUMENTS", message: "Expected name/width/height", details: nil))
-                return
+                return result(FlutterError(
+                    code: "INVALID_ARGS",
+                    message: "Expected name/width/height",
+                    details: nil
+                ))
             }
-            startRecording(videoName: name, width: width, height: height, result: result)
+            startRecording(name: name, width: width, height: height, result: result)
 
         case "pushFrame":
             guard let args = call.arguments as? [String: Any],
                   let pixels = args["pixels"] as? FlutterStandardTypedData,
                   let width = args["width"] as? Int,
                   let height = args["height"] as? Int,
-                  let timestampMs = args["timestampMs"] as? Int64 else {
-                result(FlutterError(code: "INVALID_ARGS", message: "Expected pixels/width/height/timestampMs", details: nil))
-                return
+                  let tsMs = args["timestampMs"] as? Int64 else {
+                return result(FlutterError(
+                    code: "INVALID_ARGS",
+                    message: "Expected pixels/width/height/timestampMs",
+                    details: nil
+                ))
             }
-            let ts = CMTimeMake(value: timestampMs, timescale: 1000)
+            let ts = CMTimeMake(value: tsMs, timescale: 1000)
             pushFrame(pixels.data, width: width, height: height, timestamp: ts, result: result)
 
         case "stopRecording":
@@ -53,176 +57,152 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
         }
     }
 
-    // MARK: — startRecording: инициализация AVAssetWriter
-    func startRecording(videoName: String, width: Int, height: Int, result: @escaping FlutterResult) {
+    func startRecording(name: String, width: Int, height: Int, result: @escaping FlutterResult) {
         guard !isRecording else {
-            result(FlutterError(code: "ALREADY_RECORDING", message: "Recording already in progress", details: nil))
-            return
+            return result(FlutterError(code: "ALREADY_RECORDING", message: "Already recording", details: nil))
         }
         isRecording = true
-        expectedWidth = width
-        expectedHeight = height
 
-        let docsPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
-        let outputURL = URL(fileURLWithPath: docsPath).appendingPathComponent("\(videoName).mp4")
-        videoOutputURL = outputURL
-        if FileManager.default.fileExists(atPath: outputURL.path) {
-            try? FileManager.default.removeItem(at: outputURL)
+        // Файл .mov в Documents
+        let docs = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
+        let url = URL(fileURLWithPath: docs).appendingPathComponent("\(name).mov")
+        videoOutputURL = url
+        if FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.removeItem(at: url)
         }
 
+        // Создаём writer
         do {
-            videoWriter = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
+            videoWriter = try AVAssetWriter(outputURL: url, fileType: .mov)
         } catch {
-            result(FlutterError(code: "WRITER_ERROR", message: "Cannot create AVAssetWriter", details: error.localizedDescription))
-            return
+            isRecording = false
+            return result(FlutterError(code: "WRITER_ERROR", message: "Cannot create writer", details: error.localizedDescription))
         }
+        videoWriter!.shouldOptimizeForNetworkUse = true
 
-        // Здесь убираем ключ kCVPixelBufferPixelFormatTypeKey
+        // Минимальные настройки видео
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: expectedWidth,
-            AVVideoHeightKey: expectedHeight
-            // ← НЕ указываем пиксельный формат здесь
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height
         ]
-        videoWriterInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
-        videoWriterInput?.expectsMediaDataInRealTime = true
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        input.expectsMediaDataInRealTime = true
 
-        if let vInput = videoWriterInput, videoWriter!.canAdd(vInput) {
-            videoWriter!.add(vInput)
-        } else {
-            result(FlutterError(code: "INPUT_ERROR", message: "Cannot add videoInput to writer", details: nil))
-            return
+        guard let writer = videoWriter, writer.canAdd(input) else {
+            isRecording = false
+            return result(FlutterError(code: "INPUT_ERROR", message: "Cannot add input", details: nil))
         }
+        writer.add(input)
+        videoWriterInput = input
+
+        // PixelBufferAdaptor: указываем BGRA
+        let attrs: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+            kCVPixelBufferWidthKey as String: width,
+            kCVPixelBufferHeightKey as String: height
+        ]
+        pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input,
+                                                                 sourcePixelBufferAttributes: attrs)
+
+        // Сразу стартуем запись
+        writer.startWriting()
+        writer.startSession(atSourceTime: .zero)
 
         result(true)
     }
 
-
-    // MARK: — pushFrame: преобразуем RGBA → CVPixelBuffer → CMSampleBuffer → AVAssetWriterInput.append(...)
-    func pushFrame(_ rawData: Data, width: Int, height: Int, timestamp: CMTime, result: @escaping FlutterResult) {
-        guard isRecording else {
-            result(FlutterError(code: "NOT_RECORDING", message: "Recording is not started", details: nil))
-            return
+    func pushFrame(_ rawData: Data,
+                   width: Int,
+                   height: Int,
+                   timestamp: CMTime,
+                   result: @escaping FlutterResult) {
+        guard isRecording,
+              let writer = videoWriter,
+              let input = videoWriterInput,
+              let adaptor = pixelBufferAdaptor else {
+            return result(FlutterError(code: "NOT_READY", message: "Not initialized", details: nil))
         }
-        // Проверяем, что размеры совпадают с теми, что мы ждали
-        guard width == expectedWidth, height == expectedHeight else {
-            result(FlutterError(code: "SIZE_MISMATCH", message: "Frame size differs from initialized size", details: nil))
-            return
-        }
-
-        // 1) Создадим CVPixelBuffer из rawData (RGBA из Flutter; AVAssetWriter ожидает BGRA)
-        //    Чтобы получить BGRA, можно либо настроить pixelBufferFormat в RepaintBoundary (но там всегда RGBA),
-        //    либо скопировать байты и аккуратно поменять порядок каналов. Упрощённо здесь считаем, что Flutter присылает BGRA.
-        //    Если он шлёт именно RGBA, нужно перед отправкой поменять порядок байтов (R<->B). Ниже пример без конвертации.
-        var pixelBuffer: CVPixelBuffer?
-        let attrs: [String: Any] = [
-            kCVPixelBufferCGImageCompatibilityKey as String: true,
-            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
-            kCVPixelBufferWidthKey as String: width,
-            kCVPixelBufferHeightKey as String: height,
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
-        ]
-        let status = CVPixelBufferCreateWithBytes(
-            kCFAllocatorDefault,
-            width,
-            height,
-            kCVPixelFormatType_32BGRA,
-            UnsafeMutableRawPointer(mutating: (rawData as NSData).bytes),
-            width * 4,
-            nil,
-            nil,
-            attrs as CFDictionary,
-            &pixelBuffer
-        )
-        guard status == kCVReturnSuccess, let pxBuffer = pixelBuffer else {
-            result(FlutterError(code: "PIXELBUFFER_ERROR", message: "Failed to create CVPixelBuffer", details: "\(status)"))
-            return
+        if writer.status == .failed {
+            let err = writer.error?.localizedDescription ?? "Unknown"
+            return result(FlutterError(code: "WRITER_FAILED", message: "Writer failed: \(err)", details: nil))
         }
 
-        // 2) Создадим CMVideoFormatDescription для CVPixelBuffer
-        var formatDesc: CMVideoFormatDescription?
-        let fmtStatus = CMVideoFormatDescriptionCreateForImageBuffer(
-            allocator: kCFAllocatorDefault,
-            imageBuffer: pxBuffer,
-            formatDescriptionOut: &formatDesc
-        )
-        guard fmtStatus == noErr, let fmtDesc = formatDesc else {
-            result(FlutterError(code: "FORMAT_DESC_ERROR", message: "Failed to create format description", details: "\(fmtStatus)"))
-            return
-        }
-
-        // 3) Создадим CMSampleBuffer из CVPixelBuffer и установим тайминг
-        var sampleBuffer: CMSampleBuffer?
-        var timingInfo = CMSampleTimingInfo(
-            duration: CMTime.invalid,
-            presentationTimeStamp: timestamp,
-            decodeTimeStamp: CMTime.invalid
-        )
-        let sbStatus = CMSampleBufferCreateReadyWithImageBuffer(
-            allocator: kCFAllocatorDefault,
-            imageBuffer: pxBuffer,
-            formatDescription: fmtDesc,
-            sampleTiming: &timingInfo,
-            sampleBufferOut: &sampleBuffer
-        )
-        guard sbStatus == noErr, let cmsb = sampleBuffer else {
-            result(FlutterError(code: "SAMPLEBUFFER_ERROR", message: "Failed to create CMSampleBuffer", details: "\(sbStatus)"))
-            return
-        }
-
-        // 4) Если это первый кадр — запускаем сессию записи
-        guard let writer = videoWriter, let vInput = videoWriterInput else {
-            result(FlutterError(code: "WRITER_NOT_READY", message: "AVAssetWriter not initialized", details: nil))
-            return
-        }
-        if writer.status == .unknown {
-            firstTimestamp = timestamp
-            writer.startWriting()
-            writer.startSession(atSourceTime: timestamp)
-        }
-
-        // 5) Добавляем кадр, если вход готов принять данные
-        if writer.status == .writing && vInput.isReadyForMoreMediaData {
-            let appended = vInput.append(cmsb)
-            if !appended {
-                // Можно логировать ошибку: vInput.error?.localizedDescription
-                result(FlutterError(code: "APPEND_FAILED", message: "Cannot append sample buffer", details: "no details"))
-            } else {
-                result(true)
+        DispatchQueue.global(qos: .userInitiated).async {
+            // RGBA → BGRA
+            var bgra = rawData
+            bgra.withUnsafeMutableBytes { buf in
+                let p = buf.bindMemory(to: UInt8.self)
+                for i in stride(from: 0, to: p.count, by: 4) {
+                    let r = p[i]
+                    p[i]     = p[i+2]
+                    p[i+2]   = r
+                }
             }
-        } else {
-            result(false) // Writer не готов, кадр пропускаем
+
+            // Создаём CVPixelBuffer и копируем
+            var pxOpt: CVPixelBuffer?
+            let attrs: [String: Any] = [
+                kCVPixelBufferCGImageCompatibilityKey as String: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
+                kCVPixelBufferWidthKey as String: width,
+                kCVPixelBufferHeightKey as String: height,
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ]
+            let status = CVPixelBufferCreate(kCFAllocatorDefault,
+                                             width, height,
+                                             kCVPixelFormatType_32BGRA,
+                                             attrs as CFDictionary,
+                                             &pxOpt)
+            guard status == kCVReturnSuccess, let px = pxOpt else {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "PIXEL_ERR", message: "Cannot alloc pixelBuffer", details: "\(status)"))
+                }
+                return
+            }
+            CVPixelBufferLockBaseAddress(px, [])
+            if let dst = CVPixelBufferGetBaseAddress(px) {
+                bgra.withUnsafeBytes { src in
+                    memcpy(dst, src.baseAddress!, width * height * 4)
+                }
+            }
+            CVPixelBufferUnlockBaseAddress(px, [])
+
+            // Append через адаптор
+            if writer.status == .writing && input.isReadyForMoreMediaData {
+                let ok = adaptor.append(px, withPresentationTime: timestamp)
+                DispatchQueue.main.async {
+                    if ok { result(true) }
+                    else {
+                        let e = writer.error?.localizedDescription
+                        result(FlutterError(code: "APPEND_ERR", message: "Append failed", details: e))
+                    }
+                }
+            } else {
+                DispatchQueue.main.async { result(false) }
+            }
         }
     }
 
-    // MARK: — stopRecording: закрытие записи и возврат пути к файлу
     func stopRecording(result: @escaping FlutterResult) {
-        guard isRecording else {
-            result(FlutterError(code: "NOT_RECORDING", message: "Recording not in progress", details: nil))
-            return
+        guard isRecording,
+              let writer = videoWriter,
+              let input = videoWriterInput else {
+            return result(FlutterError(code: "NOT_RECORDING", message: "No recording", details: nil))
         }
         isRecording = false
-
-        guard let writer = videoWriter, let vInput = videoWriterInput else {
-            result(FlutterError(code: "WRITER_NOT_READY", message: "AVAssetWriter not initialized", details: nil))
-            return
-        }
-
-        // Сообщаем, что больше не будет данных
-        vInput.markAsFinished()
-
+        input.markAsFinished()
         writer.finishWriting { [weak self] in
-            guard let self = self else { return }
-            if let err = writer.error {
-                result(FlutterError(code: "FINISH_ERROR", message: "Error finishing writing", details: err.localizedDescription))
-            } else {
-                // Возвращаем путь к готовому файлу
-                result(self.videoOutputURL?.path)
+            DispatchQueue.main.async {
+                if let err = writer.error {
+                    result(FlutterError(code: "FINISH_ERR", message: "Finish failed", details: err.localizedDescription))
+                } else {
+                    result(self?.videoOutputURL?.path)
+                }
             }
-            // Обнуляем состояния
-            self.videoWriter = nil
-            self.videoWriterInput = nil
-            self.firstTimestamp = nil
+            self?.videoWriter = nil
+            self?.videoWriterInput = nil
+            self?.pixelBufferAdaptor = nil
         }
     }
 }
