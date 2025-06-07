@@ -1,63 +1,174 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
-
-import 'package:flutter/services.dart';
-import 'package:flutter_widget_recorder/flutter_widget_recorder.dart';
+import 'package:flutter_widget_recorder/widget_recorder_controller.dart';
+import 'package:flutter_widget_recorder/widget_recorder_wrapper.dart';
+import 'package:share_plus/share_plus.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatefulWidget {
+class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
-  State<MyApp> createState() => _MyAppState();
+  Widget build(BuildContext context) {
+    return MaterialApp(home: ExampleScreen());
+  }
 }
 
-class _MyAppState extends State<MyApp> {
-  String _platformVersion = 'Unknown';
-  final _flutterWidgetRecorderPlugin = FlutterWidgetRecorder();
+class ExampleScreen extends StatefulWidget {
+  const ExampleScreen({super.key});
 
   @override
-  void initState() {
-    super.initState();
-    initPlatformState();
-  }
+  State<ExampleScreen> createState() => _ExampleScreenState();
+}
 
-  // Platform messages are asynchronous, so we initialize in an async method.
-  Future<void> initPlatformState() async {
-    String platformVersion;
-    // Platform messages may fail, so we use a try/catch PlatformException.
-    // We also handle the message potentially returning null.
-    try {
-      platformVersion =
-          await _flutterWidgetRecorderPlugin.getPlatformVersion() ?? 'Unknown platform version';
-    } on PlatformException {
-      platformVersion = 'Failed to get platform version.';
-    }
+class _ExampleScreenState extends State<ExampleScreen> {
+  final WidgetRecorderController _controller = WidgetRecorderController(
+    targetFps: 30,
+  );
 
-    // If the widget was removed from the tree while the asynchronous platform
-    // message was in flight, we want to discard the reply rather than calling
-    // setState to update our non-existent appearance.
-    if (!mounted) return;
-
-    setState(() {
-      _platformVersion = platformVersion;
-    });
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(
-          title: const Text('Plugin example app'),
-        ),
-        body: Center(
-          child: Text('Running on: $_platformVersion\n'),
-        ),
+    return Scaffold(
+      appBar: AppBar(title: const Text('Example')),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        spacing: 10,
+        children: [
+          FloatingActionButton(
+            heroTag: 'start',
+            key: const Key('start_button'),
+            onPressed: () {
+              _controller.startRecording('example');
+            },
+            child: const Icon(Icons.play_arrow),
+          ),
+          FloatingActionButton(
+            heroTag: 'stop',
+            key: const Key('stop_button'),
+            onPressed: () async {
+              await _controller.stopRecording();
+
+              if (_controller.path != null) {
+                await Share.shareXFiles([XFile(_controller.path!)]);
+              }
+            },
+            child: const Icon(Icons.stop_circle),
+          ),
+          ListenableBuilder(
+            listenable: _controller,
+            builder: (context, child) {
+              if (_controller.path == null) {
+                return const SizedBox.shrink();
+              }
+              return FloatingActionButton(
+                heroTag: 'share',
+                key: const Key('share_button'),
+                onPressed: () async {
+                  if (_controller.path != null) {
+                    await Share.shareXFiles([XFile(_controller.path!)]);
+                  }
+                },
+                child: const Icon(Icons.share),
+              );
+            },
+          ),
+        ],
       ),
+      body: Column(
+        spacing: 10,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: ColoredBox(
+              color: Colors.blue,
+              child: WidgetRecorderWrapper(
+                controller: _controller,
+                child: const AnimationExample(),
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListenableBuilder(
+              listenable: _controller,
+              builder: (context, child) {
+                if (_controller.path == null) {
+                  return Text(
+                    'No path',
+                    key: const Key('no_path_text'),
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  );
+                }
+                return Text(
+                  'Path: ${_controller.path}',
+                  key: const Key('path_text'),
+                  style: Theme.of(context).textTheme.bodyLarge,
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AnimationExample extends StatefulWidget {
+  const AnimationExample({super.key});
+
+  @override
+  State<AnimationExample> createState() => _AnimationExampleState();
+}
+
+class _AnimationExampleState extends State<AnimationExample>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    );
+    _controller.repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            return Stack(
+              children: [
+                Positioned(
+                  left: _controller.value * (constraints.maxWidth - 100),
+                  top: _controller.value * (constraints.maxHeight - 100),
+                  child: ColoredBox(
+                    color: Colors.red,
+                    child: SizedBox.square(dimension: 100),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }
