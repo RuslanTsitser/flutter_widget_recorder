@@ -1,6 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_widget_recorder/flutter_widget_recorder_method_channel.dart';
+import 'package:flutter_widget_recorder/src/flutter_widget_recorder_method_channel.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

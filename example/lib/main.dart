@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_widget_recorder/widget_recorder_controller.dart';
-import 'package:flutter_widget_recorder/widget_recorder_wrapper.dart';
+import 'package:flutter_widget_recorder/flutter_widget_recorder.dart';
 import 'package:share_plus/share_plus.dart';
 
 void main() {
