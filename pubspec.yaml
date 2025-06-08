@@ -4,6 +4,9 @@ description:
   widget and sending it to the platform plugin for conversion to video"
 version: 0.0.1
 homepage: https://github.com/RuslanTsitser/flutter_widget_recorder
+repository: https://github.com/RuslanTsitser/flutter_widget_recorder
+issue_tracker: https://github.com/RuslanTsitser/flutter_widget_recorder/issues
+documentation: https://github.com/RuslanTsitser/flutter_widget_recorder/blob/main/README.md
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
