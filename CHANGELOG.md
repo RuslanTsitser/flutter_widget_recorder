@@ -1,6 +1,13 @@
 # Changelog
 
-## [Unreleased]
+## [0.0.2] - 2025-06-09
+
+### Added
+
+- Comments and documentation in the Swift code for easier maintenance.
+- Added `isWithTicker` parameter to `WidgetRecorderController` to use `Ticker` instead of `Timer` for recording.
+
+## [0.0.1] - 2025-07-08
 
 ### Fixed
 
@@ -14,11 +21,6 @@
 - Now uses `pixelWidth` and `pixelHeight` (aligned sizes) for all AVAssetWriter and buffer operations.
 - Fills extra buffer space (right and bottom) with black pixels to match codec requirements.
 - Simplified and clarified the logic for copying and converting pixel data from Flutter to native iOS buffers.
-
-### Added
-
-- Additional error messages for invalid stride and buffer creation failures.
-- Comments and documentation in the Swift code for easier maintenance.
 
 ---
 
