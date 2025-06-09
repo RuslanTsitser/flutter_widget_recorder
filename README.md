@@ -9,6 +9,13 @@ A Flutter plugin for recording widget content as video (H.264/MP4) or image sequ
 - Handles devicePixelRatio and pixel alignment for video codecs
 - Automatic padding to meet iOS video codec requirements (multiples of 16)
 - Error diagnostics and robust handling of edge cases
+- Support for sharing recorded videos
+
+## Limitations
+
+- The plugin can only record Flutter-rendered widgets
+- Platform-specific widgets (like maps, camera, webview) cannot be recorded
+- Only iOS platform is supported at the moment
 
 ## Installation
 
@@ -16,27 +23,41 @@ Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  flutter_widget_recorder:
-    git:
-      url: <your-repo-url>
+  flutter_widget_recorder: ^0.0.2
 ```
 
 Then run:
 
-```
+```bash
 flutter pub get
 ```
 
 ## Usage
 
+First, create a controller in your StatefulWidget:
+
+```dart
+class _MyWidgetState extends State<MyWidget> {
+  final WidgetRecorderController _controller = WidgetRecorderController(
+    targetFps: 30, // Optional: Set target FPS
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+  
+  // ... rest of your widget code
+}
+```
+
 Wrap the widget you want to record:
 
 ```dart
-import 'package:flutter_widget_recorder/flutter_widget_recorder.dart';
-
 Widget build(BuildContext context) {
-  return WidgetRecorder(
-    controller: _recorderController,
+  return WidgetRecorderWrapper(
+    controller: _controller,
     child: YourWidget(),
   );
 }
@@ -45,22 +66,27 @@ Widget build(BuildContext context) {
 Start and stop recording:
 
 ```dart
-final _recorderController = WidgetRecorderController();
-
 // Start recording
-await _recorderController.startRecording(
-  name: 'my_video',
-  width: widgetWidth,
-  height: widgetHeight,
+await _controller.startRecording(
+  'my_video',
   pixelRatio: MediaQuery.devicePixelRatioOf(context),
 );
 
-// Push frames (usually handled automatically)
-await _recorderController.pushFrame();
-
 // Stop recording
-final path = await _recorderController.stopRecording();
+await _controller.stopRecording();
+
+// Get the path to the recorded video
+final videoPath = _controller.path;
 ```
+
+## Example
+
+Check out the [example](example/lib/main.dart) for a complete implementation that includes:
+
+- Recording a widget with animation
+- Start/Stop recording controls
+- Sharing the recorded video
+- Display of the recording path
 
 ## iOS Notes
 
