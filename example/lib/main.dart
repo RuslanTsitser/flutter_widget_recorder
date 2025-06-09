@@ -45,21 +45,14 @@ class _ExampleScreenState extends State<ExampleScreen> {
           FloatingActionButton(
             heroTag: 'start',
             key: const Key('start_button'),
-            onPressed: () {
-              _controller.startRecording('example', pixelRatio: pixelRatio);
-            },
+            onPressed: () =>
+                _controller.startRecording('example', pixelRatio: pixelRatio),
             child: const Icon(Icons.play_arrow),
           ),
           FloatingActionButton(
             heroTag: 'stop',
             key: const Key('stop_button'),
-            onPressed: () async {
-              await _controller.stopRecording();
-
-              if (_controller.path != null) {
-                await Share.shareXFiles([XFile(_controller.path!)]);
-              }
-            },
+            onPressed: _controller.stopRecording,
             child: const Icon(Icons.stop_circle),
           ),
           ListenableBuilder(
