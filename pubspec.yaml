@@ -28,5 +28,5 @@ flutter:
       ios:
         pluginClass: FlutterWidgetRecorderPlugin
       android:
-        package: com.example.flutter_widget_recorder
+        package: com.tsitser.flutter_widget_recorder
         pluginClass: FlutterWidgetRecorderPlugin

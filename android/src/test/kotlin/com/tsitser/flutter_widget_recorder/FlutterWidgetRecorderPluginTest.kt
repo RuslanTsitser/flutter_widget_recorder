@@ -1,4 +1,4 @@
-package com.example.flutter_widget_recorder
+package com.tsitser.flutter_widget_recorder
 
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel

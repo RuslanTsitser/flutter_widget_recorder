@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.flutter_widget_recorder">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.tsitser.flutter_widget_recorder">
   <application>
     <meta-data android:name="flutterEmbedding" android:value="2" />
   </application>

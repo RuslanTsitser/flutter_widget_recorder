@@ -1,4 +1,4 @@
-package com.example.flutter_widget_recorder
+package com.tsitser.flutter_widget_recorder
 
 import android.content.Context
 import android.media.*
