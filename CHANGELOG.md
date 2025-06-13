@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.0] - 2025-06-13
+
+### Added
+
+- Added Android platform support
+- Implemented H.264 video recording for Android using MediaCodec and MediaMuxer
+- Added proper package name for Android (com.tsitser.flutter_widget_recorder)
+- Added example for creating a video from camera
+
+### Changed
+
+- Updated package structure to support both iOS and Android platforms
+- Improved documentation with platform-specific notes
+
 ## [0.0.2] - 2025-06-09
 
 ### Added

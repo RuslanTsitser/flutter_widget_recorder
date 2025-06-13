@@ -1,21 +1,19 @@
 # Flutter Widget Recorder
 
-A Flutter plugin for recording widget content as video (H.264/MP4) or image sequences on iOS.
+A Flutter plugin for recording widget content as video (H.264/MP4) or image sequences on iOS and Android.
 
 ## Features
 
 - Record any Flutter widget as a video (MP4, H.264 codec)
 - Frame-accurate capture with custom resolution and pixel ratio
 - Handles devicePixelRatio and pixel alignment for video codecs
-- Automatic padding to meet iOS video codec requirements (multiples of 16)
+- Automatic padding to meet video codec requirements (multiples of 16)
 - Error diagnostics and robust handling of edge cases
-- Support for sharing recorded videos
+- Cross-platform support (iOS and Android)
 
 ## Limitations
 
 - The plugin can only record Flutter-rendered widgets
-- Platform-specific widgets (like maps, camera, webview) cannot be recorded
-- Only iOS platform is supported at the moment
 
 ## Installation
 
@@ -23,7 +21,7 @@ Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  flutter_widget_recorder: ^0.0.2
+  flutter_widget_recorder: ^0.1.0
 ```
 
 Then run:
@@ -88,12 +86,22 @@ Check out the [example](example/lib/main.dart) for a complete implementation tha
 - Sharing the recorded video
 - Display of the recording path
 
-## iOS Notes
+## Platform Notes
+
+### iOS
 
 - **Pixel Alignment:** iOS H.264 video requires frame sizes to be multiples of 16. The plugin automatically pads frames as needed. Extra space is filled with black pixels.
 - **Automatic Adjustment:** The widget automatically adjusts (pads) the recorded area to the nearest multiple of 16 pixels to ensure compatibility with the video codec. You do not need to manually align your widget size.
-- **Black Borders:** If your widget size is not a multiple of 16, the output video will have black borders on the right and/or bottom.
-- **Performance:** Recording at high resolutions or high frame rates may impact performance.
+- **Padding:** If your widget size is not a multiple of 16, the output video will have paddings on the right and/or bottom.
+
+### Android
+
+- **Pixel Alignment:** Similar to iOS, Android H.264 video requires frame sizes to be multiples of 16. The plugin handles this automatically.
+
+### Performance
+
+- Recording at high resolutions or high frame rates may impact performance on both platforms.
+- Consider using lower resolutions or frame rates for better performance.
 
 ## Troubleshooting
 

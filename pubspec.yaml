@@ -2,7 +2,7 @@ name: flutter_widget_recorder
 description:
   "A Flutter plugin for recording widget animation using RepaintBoundary
   widget and sending it to the platform plugin for conversion to video"
-version: 0.0.2
+version: 0.1.0
 homepage: https://github.com/RuslanTsitser/flutter_widget_recorder
 repository: https://github.com/RuslanTsitser/flutter_widget_recorder
 issue_tracker: https://github.com/RuslanTsitser/flutter_widget_recorder/issues
