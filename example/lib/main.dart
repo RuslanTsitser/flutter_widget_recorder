@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_widget_recorder/flutter_widget_recorder.dart';
+import 'package:flutter_widget_recorder_example/camera_screen.dart';
 import 'package:share_plus/share_plus.dart';
 
 void main() {
@@ -25,6 +26,7 @@ class ExampleScreen extends StatefulWidget {
 class _ExampleScreenState extends State<ExampleScreen> {
   final WidgetRecorderController _controller = WidgetRecorderController(
     targetFps: 30,
+    isWithTicker: true,
   );
 
   @override
@@ -72,6 +74,15 @@ class _ExampleScreenState extends State<ExampleScreen> {
                 child: const Icon(Icons.share),
               );
             },
+          ),
+          FloatingActionButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => CameraScreen()),
+              );
+            },
+            child: const Icon(Icons.camera),
           ),
         ],
       ),
